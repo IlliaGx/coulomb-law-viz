@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Закон Кулона</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; height: 100%; background-color: #020617; }
+        html { height: 100%; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+
+<body class="bg-slate-950 h-full">
+    <div id="root" class="h-full"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        const TRANSLATIONS = {
+            uk: {
+                charges: 'Заряди',
+                addPositive: '+',
+                addNegative: '−',
+                remove: 'Видалити',
+                reset: 'Скинути',
+                display: 'Відображення',
+                fieldLines: 'Силові лінії',
+                equipotential: 'Еквіпотенціалі',
+                vectors: 'Вектори E⃗',
+                forces: 'Сили F⃗',
+                potentialMap: 'Карта φ',
+                presets: 'Приклади',
+                dipole: 'Диполь',
+                sameCharges: 'Однойменні',
+                quadrupole: 'Квадруполь',
+                triangle: 'Трикутник',
+                line: 'Лінія',
+                positive: '+ позитивний',
+                negative: '− негативний',
+                fieldLinesLegend: 'силові лінії E⃗',
+                forceLegend: 'сила F⃗',
+                charge: 'Заряд',
+                position: 'Позиція',
+                discharge: 'РОЗРЯД!',
+                info1: 'Силові лінії: + → −',
+                info2: 'Еквіпотенціалі ⊥ E⃗',
+                info3: 'Зіткнення +/− = розряд'
+            },
+            en: {
+                charges: 'Charges',
+                addPositive: '+',
+                addNegative: '−',
+                remove: 'Remove',
+                reset: 'Reset',
+                display: 'Display',
+                fieldLines: 'Field lines',
+                equipotential: 'Equipotential',
+                vectors: 'Vectors E⃗',
+                forces: 'Forces F⃗',
+                potentialMap: 'Potential φ',
+                presets: 'Presets',
+                dipole: 'Dipole',
+                sameCharges: 'Same',
+                quadrupole: 'Quadrupole',
+                triangle: 'Triangle',
+                line: 'Line',
+                positive: '+ positive',
+                negative: '− negative',
+                fieldLinesLegend: 'field lines E⃗',
+                forceLegend: 'force F⃗',
+                charge: 'Charge',
+                position: 'Position',
+                discharge: 'DISCHARGE!',
+                info1: 'Field lines: + → −',
+                info2: 'Equipotentials ⊥ E⃗',
+                info3: 'Collision +/− = discharge'
+            }
+        };
+
+        function CoulombLaw() {
+            const canvasRef = useRef(null);
+            const containerRef = useRef(null);
+            const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+
+            const getUrlLang = () => {
+                const params = new URLSearchParams(window.location.search);
+                const l = params.get('lang');
+                return (l === 'en' || l === 'uk') ? l : 'uk';
+            };
+
+            const [lang, setLang] = useState(getUrlLang);
+            const t = TRANSLATIONS[lang] || TRANSLATIONS['uk'];
+
+            const toggleLang = () => {
+                const newLang = lang === 'uk' ? 'en' : 'uk';
+                setLang(newLang);
+                
+                const url = new URL(window.location);
+                url.searchParams.set('lang', newLang);
+                window.history.replaceState({}, '', url);
+            };
+
+            useEffect(() => {
+                const handlePopState = () => {
+                    const params = new URLSearchParams(window.location.search);
+                    const l = params.get('lang');
+                    if (l && l !== lang && TRANSLATIONS[l]) {
+                        setLang(l);
+                    }
+                };
+                window.addEventListener('popstate', handlePopState);
+                return () => window.removeEventListener('popstate', handlePopState);
+            }, [lang]);
+
+            const [charges, setCharges] = useState([
+                { id: 1, x: 250, y: 300, q: 1 },
+                { id: 2, x: 550, y: 300, q: -1 },
+            ]);
+            const [draggedCharge, setDraggedCharge] = useState(null);
+            const [showFieldLines, setShowFieldLines] = useState(true);
+            const [showEquipotential, setShowEquipotential] = useState(true);
+            const [showVectors, setShowVectors] = useState(true);
+            const [showForces, setShowForces] = useState(true);
+            const [showPotentialMap, setShowPotentialMap] = useState(false);
+            const [selectedCharge, setSelectedCharge] = useState(null);
+            const [nextId, setNextId] = useState(3);
+            const [isFullscreen, setIsFullscreen] = useState(false);
+            const [dischargeEffect, setDischargeEffect] = useState(null);
+
+            const kDisplay = 80000;
+
+            // Resize handler
+            useEffect(() => {
+                const updateSize = () => {
+                    if (containerRef.current) {
+                        const rect = containerRef.current.getBoundingClientRect();
+                        setCanvasSize({
+                            width: Math.floor(rect.width),
+                            height: Math.floor(rect.height)
+                        });
+                    }
+                };
+
+                updateSize();
+                const resizeObserver = new ResizeObserver(updateSize);
+                if (containerRef.current) {
+                    resizeObserver.observe(containerRef.current);
+                }
+
+                return () => resizeObserver.disconnect();
+            }, []);
+
+            // Update charge positions when canvas resizes to keep them inside
+            useEffect(() => {
+                if (canvasSize.width > 0 && canvasSize.height > 0) {
+                    setCharges(prev => prev.map(c => ({
+                        ...c,
+                        x: Math.min(c.x, canvasSize.width - 30),
+                        y: Math.min(c.y, canvasSize.height - 30)
+                    })));
+                }
+            }, [canvasSize]);
+
+            // Physics: Collisions
+            useEffect(() => {
+                const collisionDistance = 35;
+                let newCharges = [...charges];
+                let discharged = false;
+                let dischargePos = null;
+
+                for (let i = 0; i < newCharges.length; i++) {
+                    for (let j = i + 1; j < newCharges.length; j++) {
+                        const c1 = newCharges[i];
+                        const c2 = newCharges[j];
+                        const dx = c2.x - c1.x;
+                        const dy = c2.y - c1.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < collisionDistance && c1.q * c2.q < 0) {
+                            dischargePos = { x: (c1.x + c2.x) / 2, y: (c1.y + c2.y) / 2 };
+                            const totalQ = c1.q + c2.q;
+
+                            if (Math.abs(totalQ) < 0.01) {
+                                newCharges = newCharges.filter((_, idx) => idx !== i && idx !== j);
+                            } else {
+                                if (Math.abs(c1.q) > Math.abs(c2.q)) {
+                                    newCharges[i] = { ...c1, q: totalQ };
+                                    newCharges = newCharges.filter((_, idx) => idx !== j);
+                                } else {
+                                    newCharges[j] = { ...c2, q: totalQ };
+                                    newCharges = newCharges.filter((_, idx) => idx !== i);
+                                }
+                            }
+                            discharged = true;
+                            break;
+                        }
+                    }
+                    if (discharged) break;
+                }
+
+                if (discharged) {
+                    setCharges(newCharges);
+                    setSelectedCharge(null);
+                    setDraggedCharge(null);
+                    setDischargeEffect(dischargePos);
+                    setTimeout(() => setDischargeEffect(null), 500);
+                }
+            }, [charges]);
+
+            // Physics: Calculations
+            const getField = useCallback((x, y) => {
+                let Ex = 0, Ey = 0;
+                for (const charge of charges) {
+                    const dx = x - charge.x;
+                    const dy = y - charge.y;
+                    const r2 = dx * dx + dy * dy;
+                    const r = Math.sqrt(r2);
+                    if (r < 20) continue;
+                    const E = kDisplay * Math.abs(charge.q) / r2;
+                    const sign = charge.q > 0 ? 1 : -1;
+                    Ex += sign * E * dx / r;
+                    Ey += sign * E * dy / r;
+                }
+                return { Ex, Ey };
+            }, [charges]);
+
+            const getPotential = useCallback((x, y) => {
+                let V = 0;
+                for (const charge of charges) {
+                    const dx = x - charge.x;
+                    const dy = y - charge.y;
+                    const r = Math.sqrt(dx * dx + dy * dy);
+                    if (r < 15) return charge.q > 0 ? 1000 : -1000;
+                    V += kDisplay * charge.q / r;
+                }
+                return V;
+            }, [charges]);
+
+            const getForce = (charge1, charge2) => {
+                const dx = charge2.x - charge1.x;
+                const dy = charge2.y - charge1.y;
+                const r2 = dx * dx + dy * dy;
+                const r = Math.sqrt(r2);
+                if (r < 1) return { Fx: 0, Fy: 0, F: 0, r };
+                const F = kDisplay * Math.abs(charge1.q * charge2.q) / r2;
+                const sign = charge1.q * charge2.q > 0 ? 1 : -1;
+                return { Fx: sign * F * dx / r, Fy: sign * F * dy / r, F, r };
+            };
+
+            // Drawing
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+
+                const dpr = window.devicePixelRatio || 1;
+                const width = canvasSize.width;
+                const height = canvasSize.height;
+
+                canvas.width = width * dpr;
+                canvas.height = height * dpr;
+
+                const ctx = canvas.getContext('2d');
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.scale(dpr, dpr);
+
+                ctx.fillStyle = '#020617';
+                ctx.fillRect(0, 0, width, height);
+
+                // 1. Potential Map
+                if (showPotentialMap) {
+                    const step = 8;
+                    for (let y = 0; y < height; y += step) {
+                        for (let x = 0; x < width; x += step) {
+                            const V = getPotential(x, y);
+                            const normalized = Math.tanh(V / 300);
+                            let r, g, b;
+                            if (normalized > 0) {
+                                r = Math.floor(80 + 175 * normalized);
+                                g = Math.floor(30 * (1 - normalized));
+                                b = Math.floor(40 * (1 - normalized));
+                            } else {
+                                r = Math.floor(40 * (1 + normalized));
+                                g = Math.floor(40 * (1 + normalized));
+                                b = Math.floor(80 - 175 * normalized);
+                            }
+                            ctx.fillStyle = `rgba(${r},${g},${b},0.5)`;
+                            ctx.fillRect(x, y, step, step);
+                        }
+                    }
+                }
+
+                // 2. Equipotentials
+                if (showEquipotential && charges.length > 0) {
+                    const levels = [-500, -200, -100, -50, -20, 20, 50, 100, 200, 500];
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([3, 3]);
+                    for (const level of levels) {
+                        ctx.strokeStyle = level > 0 ? 'rgba(239, 68, 68, 0.35)' : 'rgba(59, 130, 246, 0.35)';
+                        for (let y = 5; y < height - 5; y += 6) {
+                            for (let x = 5; x < width - 5; x += 6) {
+                                const V = getPotential(x, y);
+                                const Vr = getPotential(x + 6, y);
+                                const Vb = getPotential(x, y + 6);
+                                if ((V - level) * (Vr - level) < 0) {
+                                    const tt = (level - V) / (Vr - V);
+                                    ctx.beginPath(); ctx.arc(x + tt * 6, y, 1.5, 0, Math.PI * 2); ctx.stroke();
+                                }
+                                if ((V - level) * (Vb - level) < 0) {
+                                    const tt = (level - V) / (Vb - V);
+                                    ctx.beginPath(); ctx.arc(x, y + tt * 6, 1.5, 0, Math.PI * 2); ctx.stroke();
+                                }
+                            }
+                        }
+                    }
+                    ctx.setLineDash([]);
+                }
+
+                // 3. Field Lines
+                if (showFieldLines && charges.length > 0) {
+                    const positiveCharges = charges.filter(c => c.q > 0);
+                    const negativeCharges = charges.filter(c => c.q < 0);
+                    const sourceCharges = positiveCharges.length > 0 ? positiveCharges : negativeCharges;
+                    const direction = positiveCharges.length > 0 ? 1 : -1;
+
+                    const drawFieldLine = (startX, startY, dir) => {
+                        const points = [{ x: startX, y: startY }];
+                        let x = startX, y = startY;
+                        const step = 3; 
+                        const maxSteps = 800;
+
+                        for (let i = 0; i < maxSteps; i++) {
+                            const { Ex, Ey } = getField(x, y);
+                            const E = Math.sqrt(Ex * Ex + Ey * Ey);
+                            if (E < 0.01) break;
+                            const nx = x + dir * step * Ex / E;
+                            const ny = y + dir * step * Ey / E;
+                            if (nx < -50 || nx > width + 50 || ny < -50 || ny > height + 50) break;
+                            
+                            let reachedCharge = false;
+                            for (const charge of charges) {
+                                const dx = nx - charge.x, dy = ny - charge.y;
+                                if (dx * dx + dy * dy < 500) { reachedCharge = true; points.push({ x: charge.x, y: charge.y }); break; }
+                            }
+                            x = nx; y = ny;
+                            points.push({ x, y });
+                            if (reachedCharge) break;
+                        }
+
+                        if (points.length > 2) {
+                            ctx.beginPath();
+                            ctx.moveTo(points[0].x, points[0].y);
+                            for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+                            ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1.8; ctx.stroke();
+
+                            // Arrows
+                            const arrowInterval = 40;
+                            for (let i = arrowInterval; i < points.length - 5; i += arrowInterval) {
+                                const p1 = points[i - 1], p2 = points[i + 1];
+                                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                                const px = points[i].x, py = points[i].y;
+                                ctx.fillStyle = '#fbbf24'; ctx.beginPath();
+                                ctx.moveTo(px + 5 * Math.cos(angle), py + 5 * Math.sin(angle));
+                                ctx.lineTo(px - 5 * Math.cos(angle - 0.5), py - 5 * Math.sin(angle - 0.5));
+                                ctx.lineTo(px - 5 * Math.cos(angle + 0.5), py - 5 * Math.sin(angle + 0.5));
+                                ctx.closePath(); ctx.fill();
+                            }
+                        }
+                    };
+
+                    for (const charge of sourceCharges) {
+                        const numLines = Math.max(8, Math.ceil(12 * Math.abs(charge.q)));
+                        for (let i = 0; i < numLines; i++) {
+                            const angle = (2 * Math.PI * i) / numLines + 0.1;
+                            const startX = charge.x + 22 * Math.cos(angle);
+                            const startY = charge.y + 22 * Math.sin(angle);
+                            drawFieldLine(startX, startY, direction);
+                        }
+                    }
+                }
+
+                // 4. Vectors Grid
+                if (showVectors && charges.length > 0) {
+                    const gridSize = 50;
+                    for (let y = gridSize; y < height; y += gridSize) {
+                        for (let x = gridSize; x < width; x += gridSize) {
+                            let tooClose = false;
+                            for (const charge of charges) {
+                                const dx = x - charge.x, dy = y - charge.y;
+                                if (dx * dx + dy * dy < 2000) { tooClose = true; break; }
+                            }
+                            if (tooClose) continue;
+
+                            const { Ex, Ey } = getField(x, y);
+                            const E = Math.sqrt(Ex * Ex + Ey * Ey);
+                            if (E < 1) continue;
+
+                            const len = Math.min(18, 2 + Math.log(E) * 3);
+                            const angle = Math.atan2(Ey, Ex);
+                            const endX = x + len * Math.cos(angle);
+                            const endY = y + len * Math.sin(angle);
+
+                            ctx.strokeStyle = 'rgba(251, 191, 36, 0.5)'; ctx.lineWidth = 1.5;
+                            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(endX, endY); ctx.stroke();
+                            
+                            const headLen = 4;
+                            ctx.fillStyle = 'rgba(251, 191, 36, 0.7)'; ctx.beginPath();
+                            ctx.moveTo(endX, endY);
+                            ctx.lineTo(endX - headLen * Math.cos(angle - 0.4), endY - headLen * Math.sin(angle - 0.4));
+                            ctx.lineTo(endX - headLen * Math.cos(angle + 0.4), endY - headLen * Math.sin(angle + 0.4));
+                            ctx.closePath(); ctx.fill();
+                        }
+                    }
+                }
+
+                // 5. Forces
+                if (showForces && charges.length >= 2) {
+                    for (let i = 0; i < charges.length; i++) {
+                        let totalFx = 0, totalFy = 0;
+                        for (let j = 0; j < charges.length; j++) {
+                            if (i === j) continue;
+                            const { Fx, Fy } = getForce(charges[i], charges[j]);
+                            totalFx += Fx; totalFy += Fy;
+                        }
+                        const totalF = Math.sqrt(totalFx * totalFx + totalFy * totalFy);
+                        if (totalF < 1) continue;
+
+                        const scale = Math.min(70, 5 + Math.log(totalF) * 10);
+                        const angle = Math.atan2(-totalFy, -totalFx); // Direction ON the charge
+                        
+                        // We draw from charge center outward
+                        const startX = charges[i].x;
+                        const startY = charges[i].y;
+                        
+                        const visualAngle = Math.atan2(-totalFy, -totalFx); 
+
+                        const endX = startX + scale * Math.cos(visualAngle);
+                        const endY = startY + scale * Math.sin(visualAngle);
+
+                        ctx.strokeStyle = '#10b981'; ctx.fillStyle = '#10b981'; ctx.lineWidth = 3;
+                        ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY); ctx.stroke();
+                        
+                        const headLen = 10;
+                        ctx.beginPath(); ctx.moveTo(endX, endY);
+                        ctx.lineTo(endX - headLen * Math.cos(visualAngle - 0.4), endY - headLen * Math.sin(visualAngle - 0.4));
+                        ctx.lineTo(endX - headLen * Math.cos(visualAngle + 0.4), endY - headLen * Math.sin(visualAngle + 0.4));
+                        ctx.closePath(); ctx.fill();
+                    }
+                }
+
+                // 6. Charges
+                for (const charge of charges) {
+                    const isSelected = selectedCharge === charge.id;
+                    const radius = 20 + Math.abs(charge.q) * 4;
+                    const gradient = ctx.createRadialGradient(charge.x, charge.y, radius * 0.5, charge.x, charge.y, radius * 2.5);
+                    if (charge.q > 0) {
+                        gradient.addColorStop(0, 'rgba(239, 68, 68, 0.6)'); gradient.addColorStop(1, 'rgba(239, 68, 68, 0)');
+                    } else {
+                        gradient.addColorStop(0, 'rgba(59, 130, 246, 0.6)'); gradient.addColorStop(1, 'rgba(59, 130, 246, 0)');
+                    }
+                    ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(charge.x, charge.y, radius * 2.5, 0, Math.PI * 2); ctx.fill();
+
+                    ctx.fillStyle = charge.q > 0 ? '#dc2626' : '#2563eb';
+                    ctx.strokeStyle = isSelected ? '#fff' : (charge.q > 0 ? '#fca5a5' : '#93c5fd');
+                    ctx.lineWidth = isSelected ? 3 : 2;
+                    ctx.beginPath(); ctx.arc(charge.x, charge.y, radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+                    ctx.fillStyle = '#fff'; ctx.font = `bold ${16 + Math.abs(charge.q) * 3}px system-ui`;
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.fillText(charge.q > 0 ? '+' : '−', charge.x, charge.y);
+                    
+                    ctx.font = '11px system-ui'; ctx.fillStyle = '#cbd5e1'; ctx.textBaseline = 'alphabetic';
+                    ctx.fillText(`${charge.q > 0 ? '+' : ''}${charge.q}q`, charge.x, charge.y + radius + 14);
+                }
+
+                // 7. Discharge FX
+                if (dischargeEffect) {
+                    const { x, y } = dischargeEffect;
+                    for (let r = 80; r > 0; r -= 10) {
+                        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+                        ctx.fillStyle = `rgba(255, 255, 100, ${0.3 * (1 - r / 80)})`; ctx.fill();
+                    }
+                    ctx.fillStyle = '#fef08a'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center';
+                    ctx.fillText(t.discharge, x, y - 50);
+                }
+
+                // 8. Info Box
+                if (selectedCharge !== null && !dischargeEffect) {
+                    const charge = charges.find(c => c.id === selectedCharge);
+                    if (charge) {
+                        const boxX = 10, boxY = height - 60;
+                        ctx.fillStyle = 'rgba(15, 23, 42, 0.95)'; ctx.fillRect(boxX, boxY, 160, 50);
+                        ctx.strokeStyle = '#475569'; ctx.lineWidth = 1; ctx.strokeRect(boxX, boxY, 160, 50);
+                        ctx.fillStyle = '#e2e8f0'; ctx.font = '12px system-ui'; ctx.textAlign = 'left';
+                        ctx.fillText(`${t.charge}: ${charge.q > 0 ? '+' : ''}${charge.q}q`, boxX + 10, boxY + 20);
+                        ctx.fillText(`${t.position}: (${Math.round(charge.x)}, ${Math.round(charge.y)})`, boxX + 10, boxY + 40);
+                    }
+                }
+
+            }, [charges, showFieldLines, showEquipotential, showVectors, showForces, showPotentialMap, selectedCharge, dischargeEffect, getField, getPotential, canvasSize, t]);
+
+            // Mouse/Touch Handlers
+            const handleStart = (clientX, clientY) => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const x = (clientX - rect.left) * (canvasSize.width / rect.width);
+                const y = (clientY - rect.top) * (canvasSize.height / rect.height);
+                for (const charge of charges) {
+                    const radius = 20 + Math.abs(charge.q) * 4;
+                    if ((x - charge.x) ** 2 + (y - charge.y) ** 2 < radius ** 2 * 2) {
+                        setDraggedCharge(charge.id); setSelectedCharge(charge.id); return;
+                    }
+                }
+                setSelectedCharge(null);
+            };
+            const handleMove = (clientX, clientY) => {
+                if (draggedCharge === null) return;
+                const rect = canvasRef.current.getBoundingClientRect();
+                const x = (clientX - rect.left) * (canvasSize.width / rect.width);
+                const y = (clientY - rect.top) * (canvasSize.height / rect.height);
+                setCharges(prev => prev.map(c => c.id === draggedCharge ? { ...c, x: Math.max(30, Math.min(canvasSize.width - 30, x)), y: Math.max(30, Math.min(canvasSize.height - 30, y)) } : c));
+            };
+            const handleEnd = () => setDraggedCharge(null);
+
+            const addCharge = (positive) => {
+                const newCharge = { id: nextId, x: 100 + Math.random() * (canvasSize.width - 200), y: 100 + Math.random() * (canvasSize.height - 200), q: positive ? 1 : -1 };
+                setCharges([...charges, newCharge]); setNextId(nextId + 1); setSelectedCharge(newCharge.id);
+            };
+            const removeCharge = () => { if (selectedCharge !== null) { setCharges(charges.filter(c => c.id !== selectedCharge)); setSelectedCharge(null); } };
+            const changeChargeValue = (delta) => {
+                if (selectedCharge === null) return;
+                setCharges(prev => prev.map(c => { if (c.id !== selectedCharge) return c; const nq = c.q + delta; if (nq === 0) return { ...c, q: delta > 0 ? 1 : -1 }; return { ...c, q: Math.max(-3, Math.min(3, nq)) }; }));
+            };
+            const resetCharges = () => { setCharges([{ id: 1, x: Math.min(250, canvasSize.width * 0.3), y: canvasSize.height / 2, q: 1 }, { id: 2, x: Math.min(550, canvasSize.width * 0.7), y: canvasSize.height / 2, q: -1 }]); setSelectedCharge(null); setNextId(3); };
+            const setPreset = (type) => {
+                const cx = canvasSize.width / 2, cy = canvasSize.height / 2;
+                let nc = [];
+                if(type === 'dipole') nc = [{id:1,x:cx-100,y:cy,q:1}, {id:2,x:cx+100,y:cy,q:-1}];
+                else if(type === 'same') nc = [{id:1,x:cx-100,y:cy,q:1}, {id:2,x:cx+100,y:cy,q:1}];
+                else if(type === 'quadrupole') nc = [{id:1,x:cx-100,y:cy-100,q:1}, {id:2,x:cx+100,y:cy-100,q:-1}, {id:3,x:cx-100,y:cy+100,q:-1}, {id:4,x:cx+100,y:cy+100,q:1}];
+                else if(type === 'line') nc = [{id:1,x:cx-150,y:cy,q:1}, {id:2,x:cx-50,y:cy,q:1}, {id:3,x:cx+50,y:cy,q:1}, {id:4,x:cx+150,y:cy,q:1}];
+                else if(type === 'triangle') nc = [{id:1,x:cx,y:cy-100,q:1}, {id:2,x:cx-100,y:cy+80,q:-1}, {id:3,x:cx+100,y:cy+80,q:-1}];
+                setCharges(nc); setNextId(10); setSelectedCharge(null);
+            };
+            const toggleFullscreen = () => { if (!isFullscreen) document.documentElement.requestFullscreen?.(); else document.exitFullscreen?.(); };
+            useEffect(() => {
+                const h = () => setIsFullscreen(!!document.fullscreenElement);
+                document.addEventListener('fullscreenchange', h); return () => document.removeEventListener('fullscreenchange', h);
+            }, []);
+
+            return (
+                <div className={`bg-slate-950 text-white ${isFullscreen ? 'fixed inset-0 z-50' : 'h-full'} flex`}>
+                    <div className="w-44 flex flex-col gap-2 p-2 shrink-0 border-r border-slate-800">
+                        <div className="flex gap-1">
+                            <button onClick={toggleLang} className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-xs font-medium">{lang === 'uk' ? 'UA' : 'EN'}</button>
+                            <button onClick={toggleFullscreen} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-sm">{isFullscreen ? '✕' : '⛶'}</button>
+                        </div>
+                        <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-800">
+                            <h3 className="font-medium text-xs mb-2 text-slate-300">{t.charges}</h3>
+                            <div className="flex gap-1 mb-2">
+                                <button onClick={() => addCharge(true)} className="flex-1 py-2 bg-red-600 hover:bg-red-500 rounded text-sm font-bold">{t.addPositive}</button>
+                                <button onClick={() => addCharge(false)} className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-bold">{t.addNegative}</button>
+                            </div>
+                            {selectedCharge !== null && (
+                                <div className="space-y-1 mb-2">
+                                    <div className="flex gap-1">
+                                        <button onClick={() => changeChargeValue(-1)} className="flex-1 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs">−q</button>
+                                        <button onClick={() => changeChargeValue(1)} className="flex-1 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs">+q</button>
+                                    </div>
+                                    <button onClick={removeCharge} className="w-full py-1 bg-slate-800 hover:bg-red-900 rounded text-xs text-red-400">{t.remove}</button>
+                                </div>
+                            )}
+                            <button onClick={resetCharges} className="w-full py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-400">{t.reset}</button>
+                        </div>
+                        <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-800">
+                            <h3 className="font-medium text-xs mb-2 text-slate-300">{t.presets}</h3>
+                            <div className="grid grid-cols-2 gap-1">
+                                {['dipole', 'same', 'quadrupole', 'triangle', 'line'].map(p => (
+                                    <button key={p} onClick={() => setPreset(p)} className="py-1 bg-slate-700 hover:bg-slate-600 rounded text-[10px]">{t[p === 'same' ? 'sameCharges' : p]}</button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-800 text-[10px] text-slate-500 space-y-0.5 mt-auto">
+                            <p>• {t.info1}</p> <p>• {t.info2}</p> <p className="text-amber-500">• {t.info3}</p>
+                        </div>
+                    </div>
+                    <div ref={containerRef} className="flex-1 min-w-0 min-h-0 relative">
+                        <canvas ref={canvasRef} className="w-full h-full cursor-grab active:cursor-grabbing block" style={{ touchAction: 'none' }}
+                            onMouseDown={e => handleStart(e.clientX, e.clientY)}
+                            onMouseMove={e => handleMove(e.clientX, e.clientY)}
+                            onMouseUp={handleEnd} onMouseLeave={handleEnd}
+                            onTouchStart={e => { e.preventDefault(); handleStart(e.touches[0].clientX, e.touches[0].clientY); }}
+                            onTouchMove={e => { e.preventDefault(); handleMove(e.touches[0].clientX, e.touches[0].clientY); }}
+                            onTouchEnd={handleEnd}
+                        />
+                    </div>
+                    <div className="w-44 flex flex-col gap-2 p-2 shrink-0 border-l border-slate-800">
+                        <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-800">
+                            <h3 className="font-medium text-xs mb-2 text-slate-300">{t.display}</h3>
+                            <div className="space-y-1">
+                                {[
+                                    { k: 'fieldLines', v: showFieldLines, s: setShowFieldLines, c: 'text-amber-400', accent: 'accent-amber-500' },
+                                    { k: 'equipotential', v: showEquipotential, s: setShowEquipotential, c: 'text-slate-300', accent: 'accent-slate-400' },
+                                    { k: 'vectors', v: showVectors, s: setShowVectors, c: 'text-amber-400', accent: 'accent-amber-500' },
+                                    { k: 'forces', v: showForces, s: setShowForces, c: 'text-emerald-400', accent: 'accent-emerald-500' },
+                                    { k: 'potentialMap', v: showPotentialMap, s: setShowPotentialMap, c: 'text-purple-400', accent: 'accent-purple-500' }
+                                ].map(opt => (
+                                    <label key={opt.k} className="flex items-center gap-2 cursor-pointer">
+                                        <input type="checkbox" checked={opt.v} onChange={e => opt.s(e.target.checked)} className={`w-3.5 h-3.5 rounded ${opt.accent}`} />
+                                        <span className={`text-xs ${opt.c}`}>{t[opt.k]}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="bg-slate-900/50 p-2 rounded-lg border border-slate-800">
+                            <div className="space-y-1.5">
+                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500"></div><span className="text-[10px] text-red-400">{t.positive}</span></div>
+                                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500"></div><span className="text-[10px] text-blue-400">{t.negative}</span></div>
+                                <div className="flex items-center gap-2"><div className="w-3 h-0.5 bg-amber-400"></div><span className="text-[10px] text-amber-400">{t.fieldLinesLegend}</span></div>
+                                <div className="flex items-center gap-2"><div className="w-3 h-0.5 bg-emerald-500"></div><span className="text-[10px] text-emerald-400">{t.forceLegend}</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        try {
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<CoulombLaw />);
+        } catch (e) {
+            document.body.innerHTML = '<div style="color:red; padding:20px;"><h1>Error</h1><pre>' + e.toString() + '</pre></div>';
+            console.error(e);
+        }
+    </script>
+</body>
+</html>
